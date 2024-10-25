@@ -1,20 +1,17 @@
-const mongoose = require('mongoose');
-const autoIncrement = require('mongoose-auto-increment');
-
-// npm install --save --legacy-peer-deps mongoose-auto-increment
-const connection = mongoose.createConnection(process.env.DB_URI);
-autoIncrement.initialize(connection);
+const mongoose = require("mongoose");
+const { AutoIncrementID } = require("@typegoose/auto-increment");
 
 const orderSchema = new mongoose.Schema(
   {
+    id: { type: Number, unique: true }, // This will be auto-incremented
     user: {
       type: mongoose.Schema.ObjectId,
-      ref: 'User',
-      required: [true, 'order must belong to user'],
+      ref: "User",
+      required: [true, "order must belong to user"],
     },
     cartItems: [
       {
-        product: { type: mongoose.Schema.ObjectId, ref: 'Product' },
+        product: { type: mongoose.Schema.ObjectId, ref: "Product" },
         count: { type: Number, default: 1 },
         color: String,
         price: Number,
@@ -40,8 +37,8 @@ const orderSchema = new mongoose.Schema(
     },
     paymentMethodType: {
       type: String,
-      enum: ['card', 'cash'],
-      default: 'cash',
+      enum: ["card", "cash"],
+      default: "cash",
     },
     isPaid: {
       type: Boolean,
@@ -59,21 +56,29 @@ const orderSchema = new mongoose.Schema(
 
 orderSchema.pre(/^find/, function (next) {
   this.populate({
-    path: 'user',
-    select: 'name profileImg email phone',
+    path: "user",
+    select: "name profileImg email phone",
   }).populate({
-    path: 'cartItems.product',
-    select: 'title imageCover ratingsAverage ratingsQuantity',
+    path: "cartItems.product",
+    select: "title imageCover ratingsAverage ratingsQuantity",
   });
 
   next();
 });
 
-orderSchema.plugin(autoIncrement.plugin, {
-  model: 'Order',
-  field: 'id',
+// Initialize auto-increment
+orderSchema.plugin(AutoIncrementID, {
+  field: "id",
   startAt: 1,
   incrementBy: 1,
+  trackerCollection: "counters", // Optional: name of the counter collection
+  trackerModelName: "Counter", // Optional: name of the counter model
 });
 
-module.exports = mongoose.model('Order', orderSchema);
+const Order = mongoose.model("Order", orderSchema);
+
+// Create indexes for better query performance
+Order.collection.createIndex({ user: 1 });
+Order.collection.createIndex({ id: 1 }, { unique: true });
+
+module.exports = Order;

@@ -1,101 +1,110 @@
-const path = require('path');
-const express = require('express');
-const dotenv = require('dotenv');
+const path = require("path");
+const express = require("express");
+const dotenv = require("dotenv");
+const morgan = require("morgan");
+require("colors");
+const compression = require("compression");
+const cors = require("cors");
+const bodyParser = require("body-parser");
 
-dotenv.config({ path: 'config.env' });
-const morgan = require('morgan');
-require('colors');
-const compression = require('compression');
-const cors = require('cors');
-const bodyParser = require('body-parser');
+const ApiError = require("./utils/apiError");
+const globalError = require("./middlewares/errorMiddleware");
+const mountRoutes = require("./routes");
+const { webhookCheckout } = require("./controllers/orderService");
+const dbConnection = require("./config/database");
 
-const ApiError = require('./utils/apiError');
-const globalError = require('./middlewares/errorMiddleware');
-const mountRoutes = require('./routes');
-const { webhookCheckout } = require('./controllers/orderService');
+// Load environment variables based on NODE_ENV
+const envFile = process.env.NODE_ENV === "production" ? ".env" : "config.env";
+dotenv.config({ path: envFile });
 
-const dbConnection = require('./config/database');
-
-// const categoryRouter = require('./routes/categoryRoute');
-// const subCategoryRouter = require('./routes/subCategoryRoute');
-// const brandRouter = require('./routes/brandRoute');
-// const productRouter = require('./routes/productRoute');
-// const userRouter = require('./routes/userRoute');
-// const authRouter = require('./routes/authRoute');
-// const reviewRouter = require('./routes/reviewRoute');
-// const wishlistRouter = require('./routes/wishlistRoute');
-// const addressRouter = require('./routes/addressRoute');
-// const couponRouter = require('./routes/couponRoute');
-
-// DB Connection
-dbConnection();
-
-// Builtin Middleware
+// Initialize Express app
 const app = express();
 
-app.use(cors());
-app.options('*', cors());
-app.enable('trust proxy');
+// Security and preprocessing middleware
+app.set("trust proxy", 1);
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "*",
+    credentials: true,
+  })
+);
 
-// Add hook here before we call body parser, because stripe will send data in the body in form raw
+// Stripe webhook needs raw body
 app.post(
-  '/webhook-checkout',
-  // express.raw({ type: 'application/json' }),
-  bodyParser.raw({ type: 'application/json' }),
+  "/webhook-checkout",
+  bodyParser.raw({ type: "application/json" }),
   webhookCheckout
 );
 
-// Used to parse JSON bodies
-app.use(express.json());
-// app.use(cors());
-// app.options('*', cors());
-
-// Parse URL-encoded bodies
-app.use(express.urlencoded({ extended: true, limit: '10kb' }));
-app.use(express.static(path.join(__dirname, 'uploads')));
-
-if (process.env.NODE_ENV === 'development') {
-  app.use(morgan('dev'));
-  console.log(`Mode : ${process.env.NODE_ENV}`.yellow);
-}
-
+// Standard middleware
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(compression());
 
-app.use(cors());
+// Static files
+const uploadsPath = path.join(__dirname, "uploads");
+app.use("/uploads", express.static(uploadsPath));
 
-// Mount routers
-mountRoutes(app);
-// app.use('/api/v1/categories', categoryRouter);
-// app.use('/api/v1/subcategories', subCategoryRouter);
-// app.use('/api/v1/brands', brandRouter);
-// app.use('/api/v1/products', productRouter);
-// app.use('/api/v1/users', userRouter);
-// app.use('/api/v1/auth', authRouter);
-// app.use('/api/v1/reviews', reviewRouter);
-// app.use('/api/v1/wishlist', wishlistRouter);
-// app.use('/api/v1/addresses', addressRouter);
-// app.use('/api/v1/coupons', couponRouter);
+// Development logging
+if (process.env.NODE_ENV === "development") {
+  app.use(morgan("dev"));
+  console.log(`Mode: ${process.env.NODE_ENV}`.yellow);
+}
 
-app.all('*', (req, res, next) => {
-  // 3) Use a generic api error
-  next(new ApiError(`Can't find this route: ${req.originalUrl}`, 400));
+// Health check endpoint
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "OK", environment: process.env.NODE_ENV });
 });
 
-// Global error handler to catch error from express error
-// 2) with refactoring
+// Mount API routes
+mountRoutes(app);
+
+// 404 handler
+app.all("*", (req, res, next) => {
+  next(new ApiError(`Can't find this route: ${req.originalUrl}`, 404));
+});
+
+// Global error handler
 app.use(globalError);
 
-const PORT = process.env.PORT || 8000;
-const server = app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`.green);
-});
+// Database connection and server startup
+const startServer = async () => {
+  try {
+    await dbConnection();
+    const PORT = process.env.PORT || 8000;
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on port ${PORT}`.green);
+    });
 
-// we are listening to this unhandled rejection event, which then allow us to handle all
-// errors that occur in asynchronous code which were not previously handled
-process.on('unhandledRejection', (err) => {
-  console.log(err.name, err.message);
-  server.close(() => {
-    console.log('unhandledRejection!! shutting down...');
+    // Handle unhandled promise rejections
+    process.on("unhandledRejection", (err) => {
+      console.error("UNHANDLED REJECTION! 💥 Shutting down...".red);
+      console.error(err.name, err.message);
+      server.close(() => {
+        process.exit(1);
+      });
+    });
+
+    // Handle uncaught exceptions
+    process.on("uncaughtException", (err) => {
+      console.error("UNCAUGHT EXCEPTION! 💥 Shutting down...".red);
+      console.error(err.name, err.message);
+      process.exit(1);
+    });
+
+    // Handle SIGTERM signal
+    process.on("SIGTERM", () => {
+      console.log("👋 SIGTERM RECEIVED. Shutting down gracefully");
+      server.close(() => {
+        console.log("💥 Process terminated!");
+      });
+    });
+  } catch (error) {
+    console.error("Failed to start server:".red, error);
     process.exit(1);
-  });
-});
+  }
+};
+
+startServer();
+
+module.exports = app;
