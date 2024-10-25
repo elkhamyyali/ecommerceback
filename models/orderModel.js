@@ -1,16 +1,12 @@
 const mongoose = require("mongoose");
-const autoIncrement = require("mongoose-sequence")(mongoose);
-
-// npm install --save --legacy-peer-deps mongoose-auto-increment
-const connection = mongoose.createConnection(process.env.DB_URI);
-autoIncrement.initialize(connection);
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const orderSchema = new mongoose.Schema(
   {
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
-      required: [true, "order must belong to user"],
+      required: [true, "Order must belong to a user"],
     },
     cartItems: [
       {
@@ -57,6 +53,7 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Populate user and cartItems.product data on queries
 orderSchema.pre(/^find/, function (next) {
   this.populate({
     path: "user",
@@ -65,15 +62,10 @@ orderSchema.pre(/^find/, function (next) {
     path: "cartItems.product",
     select: "title imageCover ratingsAverage ratingsQuantity",
   });
-
   next();
 });
 
-orderSchema.plugin(autoIncrement.plugin, {
-  model: "Order",
-  field: "id",
-  startAt: 1,
-  incrementBy: 1,
-});
+// Add the auto-increment plugin for order ID
+orderSchema.plugin(AutoIncrement, { inc_field: "id" });
 
 module.exports = mongoose.model("Order", orderSchema);
