@@ -1,9 +1,12 @@
 const mongoose = require("mongoose");
-const { AutoIncrementID } = require("@typegoose/auto-increment");
+const autoIncrement = require("mongoose-auto-increment");
+
+// npm install --save --legacy-peer-deps mongoose-auto-increment
+const connection = mongoose.createConnection(process.env.DB_URI);
+autoIncrement.initialize(connection);
 
 const orderSchema = new mongoose.Schema(
   {
-    id: { type: Number, unique: true }, // This will be auto-incremented
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
@@ -66,19 +69,11 @@ orderSchema.pre(/^find/, function (next) {
   next();
 });
 
-// Initialize auto-increment
-orderSchema.plugin(AutoIncrementID, {
+orderSchema.plugin(autoIncrement.plugin, {
+  model: "Order",
   field: "id",
   startAt: 1,
   incrementBy: 1,
-  trackerCollection: "counters", // Optional: name of the counter collection
-  trackerModelName: "Counter", // Optional: name of the counter model
 });
 
-const Order = mongoose.model("Order", orderSchema);
-
-// Create indexes for better query performance
-Order.collection.createIndex({ user: 1 });
-Order.collection.createIndex({ id: 1 }, { unique: true });
-
-module.exports = Order;
+module.exports = mongoose.model("Order", orderSchema);
