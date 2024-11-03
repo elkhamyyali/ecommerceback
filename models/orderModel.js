@@ -1,12 +1,16 @@
 const mongoose = require("mongoose");
-const AutoIncrement = require("mongoose-sequence")(mongoose);
+const Counter = require("./counterModel");
 
 const orderSchema = new mongoose.Schema(
   {
+    id: {
+      type: Number,
+      unique: true,
+    },
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "User",
-      required: [true, "Order must belong to a user"],
+      required: [true, "order must belong to user"],
     },
     cartItems: [
       {
@@ -53,7 +57,6 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Populate user and cartItems.product data on queries
 orderSchema.pre(/^find/, function (next) {
   this.populate({
     path: "user",
@@ -65,7 +68,23 @@ orderSchema.pre(/^find/, function (next) {
   next();
 });
 
-// Add the auto-increment plugin for order ID
-orderSchema.plugin(AutoIncrement, { inc_field: "id" });
+// Add pre-save middleware for auto-increment
+orderSchema.pre("save", async function (next) {
+  try {
+    if (this.isNew) {
+      const counter = await Counter.findOneAndUpdate(
+        { id: "orderId" },
+        { $inc: { seq: 1 } },
+        { new: true, upsert: true }
+      );
+      this.id = counter.seq;
+    }
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 
-module.exports = mongoose.model("Order", orderSchema);
+const Order = mongoose.model("Order", orderSchema);
+
+module.exports = Order;
